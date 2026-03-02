@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 200809L
 #include <sys/socket.h>
 #include <stdio.h>
 #include <errno.h>
@@ -5,14 +6,18 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <unistd.h>
+#include <poll.h>
+#include <string.h>
 
 #define BUFFER_SIZE 64
+#define PORT 3566
+#define MAX_FDS 64
 
 
 int read_data(int connfd, void* buffer, size_t bufsize) {
     ssize_t n = recv(connfd, buffer, bufsize - 1, 0);
     if (n < 0) {
-        printf("---Receiving Error---\n");
+        perror("---Receiving Error---\n");
         return -1;
     }    
     
@@ -22,7 +27,7 @@ int read_data(int connfd, void* buffer, size_t bufsize) {
 int write_data(int fd, void* buffer, size_t bufsize) {
     ssize_t n = send(fd, buffer, bufsize, 0);
     if (n < 0) {
-        printf("---Sending error---\n");
+        perror("---Sending error---\n");
         return -1;
     }
 
@@ -77,54 +82,98 @@ int accept_connection(int fd, struct sockaddr_in *client_address) {
 int create_server(struct sockaddr_in *addr_data) {
     int fd;
     if ((fd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
-        printf("---socket Error---\n");
+        perror("---socket Error---\n");
     };
     int val = 1;
     setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val));
     
+    memset(addr_data, 0, sizeof(struct sockaddr_in));
     addr_data->sin_family = AF_INET;
-    addr_data->sin_port = htons(3655);
+    addr_data->sin_port = htons(PORT);
     addr_data->sin_addr.s_addr = htonl(INADDR_ANY);
 
+    
     int rv = bind(fd, (const struct sockaddr *)addr_data, sizeof(*addr_data));
     if (rv == -1) {
-        printf("---Binding Error---\n");
+        perror("---Binding Error---\n");
         return -1;
     }
 
-    rv = listen(fd, 10);
+    rv = listen(fd, 100);
     if (rv == -1) {
-        printf("---Listen Error---\n");
+        perror("---Listen Error---\n");
         return -1;
     }
-
+    printf("Listening...\n");
     return fd;
 }
 
 int main() {
-    struct sockaddr_in addr; 
-    struct sockaddr_in client_addr;
-    int fd = create_server(&addr);
+    struct sockaddr_in addr, client_addr; 
+    struct pollfd fds[MAX_FDS];  
+    nfds_t nfds = 1;
+    int listen_fd = create_server(&addr);
     int new_fd;
-    if (fd == -1) {
-        printf("error creating server in main process\n");
-        exit(0);
-    }
-
-    if (new_fd = accept_connection(fd, &client_addr) == -1) {
-        printf("Error accepting connection\n");
-        exit(0);
-    }
-
     char buf[BUFFER_SIZE];
-    int n;
-    if ((n = read_data(new_fd, buf, BUFFER_SIZE)) == -1) {
-        printf("Error receiving data\n");
+    //int poll(struct pollfd *fds, nfds_t nfds, int timeout);
+    // struct pollfd {
+    //            int   fd;         
+    //            short events;     
+    //            short revents;    
+    //        };
+
+    if (listen_fd == -1) {
+        perror("error creating server in main process\n");
         exit(0);
     }
+    fds[0].fd = listen_fd;
+    fds[0].events = POLLIN;    
 
-    ((char*)buf)[n] = '\0';
-    printf("Data read: %s\n", buf);
+    while (1) {
+        int ready = poll(fds, nfds, -1);
+        printf("fds-> %d\n", fds[0].fd);
+        if (ready < 0) {
+            perror("error with poll\n");
+            continue;
+        }
+        
+        for (nfds_t i = 0; i < nfds; i++) {
+            
+            if (fds[i].revents & POLLIN) {
+                if (fds[i].fd == listen_fd) {
+                    new_fd = accept_connection(listen_fd, &client_addr); 
+                    if (new_fd == -1) {
+                        perror("accept error\n");
+                        continue;
+                    }
+
+                    fds[nfds].fd = new_fd;
+                    fds[nfds].events = POLLIN;
+                    nfds++;
+
+                } else {
+                    int n;
+                    if ((n = read_data(fds[i].fd, buf, BUFFER_SIZE)) == -1) {
+                        printf("Error receiving data\n");
+                        close(fds[i].fd);
+                        fds[i] = fds[nfds - 1];
+                        nfds--;
+                        i--;
+                        continue;
+                    }
+
+                    buf[n] = '\0';
+                    printf("Data read: %s\n", buf);
+                }
+            }
+        }
+    }
+
+
+    
+    
 
     return 0;
 }
+
+//create sock structures
