@@ -9,8 +9,8 @@
 #include <poll.h>
 #include <string.h>
 
-#define BUFFER_SIZE 64
-#define PORT 3566
+#define BUFFER_SIZE 1024
+#define PORT 3565
 #define MAX_FDS 64
 
 
@@ -104,7 +104,7 @@ int create_server(struct sockaddr_in *addr_data) {
         perror("---Listen Error---\n");
         return -1;
     }
-    printf("Listening...\n");
+    printf("Listening... in port: %d\n", PORT);
     return fd;
 }
 
@@ -115,12 +115,6 @@ int main() {
     int listen_fd = create_server(&addr);
     int new_fd;
     char buf[BUFFER_SIZE];
-    //int poll(struct pollfd *fds, nfds_t nfds, int timeout);
-    // struct pollfd {
-    //            int   fd;         
-    //            short events;     
-    //            short revents;    
-    //        };
 
     if (listen_fd == -1) {
         perror("error creating server in main process\n");
@@ -131,7 +125,7 @@ int main() {
 
     while (1) {
         int ready = poll(fds, nfds, -1);
-        printf("fds-> %d\n", fds[0].fd);
+        
         if (ready < 0) {
             perror("error with poll\n");
             continue;
@@ -160,16 +154,27 @@ int main() {
                         nfds--;
                         i--;
                         continue;
-                    }
+                    } 
 
-                    buf[n] = '\0';
+                    if (n == 0) {
+                        printf("client disconnected\n");
+                        close(fds[i].fd);
+                        fds[i] = fds[nfds - 1];
+                        nfds--;
+                        i--;
+                        continue;
+                    }
+                    
                     printf("Data read: %s\n", buf);
+                    buf[n] = '\0';
+
+                      
                 }
             }
-        }
+        }   
     }
 
-
+//we can do all data but some other day
     
     
 
